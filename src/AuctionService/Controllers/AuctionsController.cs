@@ -2,15 +2,18 @@
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using Contracts;
 using Mapster;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Wolverine;
+using Wolverine.EntityFrameworkCore;
 
 namespace AuctionService.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuctionsController(AuctionDbContext context) : ControllerBase
+public class AuctionsController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<AuctionDto>>> GetAuctions(string? date)
@@ -63,9 +66,14 @@ public class AuctionsController(AuctionDbContext context) : ControllerBase
 
         context.Auctions.Add(auction);
 
-        await context.SaveChangesAsync();
+        // await context.SaveChangesAsync();
+        
+        var newAuction = auction.Adapt<AuctionDto>();
+        
+        await outbox.PublishAsync(newAuction.Adapt<AuctionCreated>());
+        await outbox.SaveChangesAndFlushMessagesAsync();
 
-        return CreatedAtAction(nameof(GetAuction), new { id = auction.Id }, auction.Adapt<AuctionDto>());
+        return CreatedAtAction(nameof(GetAuction), new { id = auction.Id }, newAuction);
     }
 
     [HttpPut("{id}")]
@@ -90,9 +98,12 @@ public class AuctionsController(AuctionDbContext context) : ControllerBase
         // TODO: Check seller is the same as the current user
         auction.UpdatedAt = DateTime.UtcNow;
         
-        updateAuctionDto.Adapt(auction.Item);
+        var updatedAuction = updateAuctionDto.Adapt(auction.Item);
         
-        await context.SaveChangesAsync();
+        await outbox.PublishAsync(updatedAuction.Adapt<AuctionUpdated>());
+        await outbox.SaveChangesAndFlushMessagesAsync();
+        
+        // await context.SaveChangesAsync();
 
         return NoContent();
     }
@@ -116,7 +127,10 @@ public class AuctionsController(AuctionDbContext context) : ControllerBase
 
         context.Auctions.Remove(auction);
 
-        await context.SaveChangesAsync();
+        await outbox.PublishAsync(auction.Adapt<AuctionDeleted>());
+        await outbox.SaveChangesAndFlushMessagesAsync();
+        
+        // await context.SaveChangesAsync();
 
         return NoContent();
     }
